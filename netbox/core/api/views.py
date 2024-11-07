@@ -1,17 +1,28 @@
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
+from rest_framework.views import APIView
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from core import filtersets
 from core.choices import DataSourceStatusChoices
 from core.jobs import SyncDataSourceJob
 from core.models import *
+from core.utils import delete_rq_job, enqueue_rq_job, get_rq_jobs_from_status, requeue_rq_job, stop_rq_job
+from django_rq.queues import get_queue, get_redis_connection
+from django_rq.utils import get_statistics
+from django_rq.settings import QUEUES_LIST
 from netbox.api.metadata import ContentTypeMetadata
 from netbox.api.viewsets import NetBoxModelViewSet, NetBoxReadOnlyModelViewSet
+from rest_framework.permissions import IsAdminUser
+from rq.job import Job as RQ_Job
+from rq.worker import Worker
 from . import serializers
 
 
@@ -71,3 +82,251 @@ class ObjectChangeViewSet(ReadOnlyModelViewSet):
     queryset = ObjectChange.objects.valid_models()
     serializer_class = serializers.ObjectChangeSerializer
     filterset_class = filtersets.ObjectChangeFilterSet
+
+
+class QueueListView(APIView):
+    """
+    Retrieve a list of RQ Queues.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Queues"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, format=None):
+        data = get_statistics(run_maintenance_tasks=True)["queues"]
+        serializer = serializers.BackgroundQueueSerializer(data, many=True)
+        return Response(serializer.data)
+
+
+class WorkerListView(APIView):
+    """
+    Retrieve a list of RQ Workers.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Workers"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, format=None):
+        # all the RQ queues should use the same connection
+        config = QUEUES_LIST[0]
+        workers = Worker.all(get_redis_connection(config['connection_config']))
+        serializer = serializers.BackgroundWorkerSerializer(workers, many=True)
+        return Response(serializer.data)
+
+
+class WorkerDetailView(APIView):
+    """
+    Retrieve the details of the specified RQ Worker.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Worker"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, worker_name, format=None):
+        # all the RQ queues should use the same connection
+        config = QUEUES_LIST[0]
+        workers = Worker.all(get_redis_connection(config['connection_config']))
+        worker = next((item for item in workers if item.name == worker_name), None)
+        if not worker:
+            raise Http404
+
+        serializer = serializers.BackgroundWorkerSerializer(worker)
+        return Response(serializer.data)
+
+
+class TaskListView(APIView):
+    """
+    Retrieve a list of RQ Tasks in the specified Queue.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Tasks"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, queue_name, format=None):
+        try:
+            queue = get_queue(queue_name)
+        except KeyError:
+            raise Http404
+
+        data = queue.get_jobs()
+        serializer = serializers.BackgroundTaskSerializer(data, many=True)
+        return Response(serializer.data)
+
+
+class BaseTaskView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    def get_task_from_id(self, task_id):
+        config = QUEUES_LIST[0]
+        task = RQ_Job.fetch(task_id, connection=get_redis_connection(config['connection_config']))
+        if not task:
+            raise Http404
+
+        return task
+
+
+class TaskDetailView(BaseTaskView):
+    """
+    Retrieve the details of the specified RQ Task.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, task_id, format=None):
+        task = self.get_task_from_id(task_id)
+        serializer = serializers.BackgroundTaskSerializer(task)
+        return Response(serializer.data)
+
+
+class TaskDeleteView(APIView):
+    """
+    Deletes the specified RQ Task.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, task_id, format=None):
+        delete_rq_job(task_id)
+        return HttpResponse(status=200)
+
+
+class TaskRequeueView(APIView):
+    """
+    Requeues the specified RQ Task.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, task_id, format=None):
+        requeue_rq_job(task_id)
+        return HttpResponse(status=200)
+
+
+class TaskEnqueueView(APIView):
+    """
+    Enqueues the specified RQ Task.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, task_id, format=None):
+        enqueue_rq_job(task_id)
+        return HttpResponse(status=200)
+
+
+class TaskStopView(APIView):
+    """
+    Stops the specified RQ Task.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get_view_name(self):
+        return "Background Task"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, task_id, format=None):
+        stopped_jobs = stop_rq_job(task_id)
+        if len(stopped_jobs) == 1:
+            return HttpResponse(status=200)
+        else:
+            return HttpResponse(status=204)
+
+
+class BaseTaskListView(APIView):
+    permission_classes = [IsAdminUser]
+    registry = None
+
+    def get_view_name(self):
+        return "Background Tasks"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, queue_name, format=None):
+        try:
+            queue = get_queue(queue_name)
+        except KeyError:
+            raise Http404
+
+        data = get_rq_jobs_from_status(queue, self.registry)
+        serializer = serializers.BackgroundTaskSerializer(data, many=True)
+        return Response(serializer.data)
+
+
+class DeferredTaskListView(BaseTaskListView):
+    """
+    Retrieve a list of Deferred RQ Tasks in the specified Queue.
+    """
+    registry = "deferred"
+
+    def get_view_name(self):
+        return "Deferred Tasks"
+
+
+class FailedTaskListView(BaseTaskListView):
+    """
+    Retrieve a list of Failed RQ Tasks in the specified Queue.
+    """
+    registry = "failed"
+
+    def get_view_name(self):
+        return "Failed Tasks"
+
+
+class FinishedTaskListView(BaseTaskListView):
+    """
+    Retrieve a list of Finished RQ Tasks in the specified Queue.
+    """
+    registry = "finished"
+
+    def get_view_name(self):
+        return "Finished Tasks"
+
+
+class StartedTaskListView(BaseTaskListView):
+    """
+    Retrieve a list of Started RQ Tasks in the specified Queue.
+    """
+    registry = "started"
+
+    def get_view_name(self):
+        return "Started Tasks"
+
+
+class QueuedTaskListView(BaseTaskListView):
+    """
+    Retrieve a list of Queued RQ Tasks in the specified Queue.
+    """
+    registry = "queued"
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request, queue_name, format=None):
+        try:
+            queue = get_queue(queue_name)
+        except KeyError:
+            raise Http404
+
+        data = queue.get_jobs()
+        serializer = serializers.BackgroundTaskSerializer(data, many=True)
+        return Response(serializer.data)
