@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 
 from dcim.forms.common import InterfaceCommonForm
 from dcim.forms.mixins import ScopedForm
-from dcim.models import Device, DeviceRole, Platform, Rack, Region, Site, SiteGroup
+from dcim.models import Device, DeviceRole, MACAddress, Platform, Rack, Region, Site, SiteGroup
 from extras.models import ConfigTemplate
 from ipam.choices import VLANQinQRoleChoices
 from ipam.models import IPAddress, VLAN, VLANGroup, VLANTranslationPolicy, VRF
@@ -379,6 +379,14 @@ class VMInterfaceForm(InterfaceCommonForm, VMComponentForm):
         widgets = {
             'mode': HTMXSelect(),
         }
+
+    def clean_mac_address(self):
+        return MACAddress.objects.create(mac_address=self.cleaned_data['mac_address'])
+
+    def save(self, commit=True):
+        result = super().save(commit=commit)
+        self.instance.mac_addresses.add(self.cleaned_data['mac_address'])
+        return result
 
 
 class VirtualDiskForm(VMComponentForm):

@@ -38,6 +38,7 @@ __all__ = (
     'InventoryItemRoleBulkEditForm',
     'InventoryItemTemplateBulkEditForm',
     'LocationBulkEditForm',
+    'MACAddressBulkEditForm',
     'ManufacturerBulkEditForm',
     'ModuleBulkEditForm',
     'ModuleBayBulkEditForm',
@@ -1274,6 +1275,28 @@ class InventoryItemTemplateBulkEditForm(BulkEditForm):
 
 
 #
+# Addressing
+#
+
+class MACAddressBulkEditForm(NetBoxModelBulkEditForm):
+    description = forms.CharField(
+        label=_('Description'),
+        max_length=200,
+        required=False
+    )
+    comments = CommentField()
+
+    model = MACAddress
+    fieldsets = (
+        FieldSet('description'),
+        # FieldSet('vrf', 'mask_length', 'dns_name', name=_('Addressing')),
+    )
+    nullable_fields = (
+        'description', 'comments',
+    )
+
+
+#
 # Device components
 #
 
@@ -1392,7 +1415,7 @@ class PowerOutletBulkEditForm(
 class InterfaceBulkEditForm(
     ComponentBulkEditForm,
     form_from_model(Interface, [
-        'label', 'type', 'parent', 'bridge', 'lag', 'speed', 'duplex', 'mac_address', 'wwn', 'mtu', 'mgmt_only',
+        'label', 'type', 'parent', 'bridge', 'lag', 'speed', 'duplex', 'wwn', 'mtu', 'mgmt_only',
         'mark_connected', 'description', 'mode', 'rf_role', 'rf_channel', 'rf_channel_frequency', 'rf_channel_width',
         'tx_power', 'wireless_lans'
     ])
@@ -1501,6 +1524,11 @@ class InterfaceBulkEditForm(
         query_params={
             'group_id': '$wireless_lan_group',
         }
+    )
+    mac_address = forms.CharField(
+        empty_value=None,
+        required=False,
+        label=_('MAC Address')
     )
 
     model = Interface

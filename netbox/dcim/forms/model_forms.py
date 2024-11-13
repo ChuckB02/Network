@@ -1,5 +1,6 @@
 from django import forms
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from timezone_field import TimeZoneFormField
 
@@ -18,7 +19,7 @@ from utilities.forms.fields import (
 )
 from utilities.forms.rendering import FieldSet, InlineFields, TabbedGroups
 from utilities.forms.widgets import APISelect, ClearableFileInput, HTMXSelect, NumberWithOptions, SelectWithPK
-from virtualization.models import Cluster
+from virtualization.models import Cluster, VMInterface
 from wireless.models import WirelessLAN, WirelessLANGroup
 from .common import InterfaceCommonForm, ModuleCommonForm
 
@@ -42,6 +43,7 @@ __all__ = (
     'InventoryItemRoleForm',
     'InventoryItemTemplateForm',
     'LocationForm',
+    'MACAddressForm',
     'ManufacturerForm',
     'ModuleForm',
     'ModuleBayForm',
@@ -865,6 +867,101 @@ class VCMemberSelectForm(forms.Form):
 
 
 #
+# Addressing
+#
+
+class MACAddressForm(NetBoxModelForm):
+    mac_address = forms.CharField(
+        required=True,
+        label=_('MAC address')
+    )
+    interface = DynamicModelChoiceField(
+        label=_('Interface'),
+        queryset=Interface.objects.all(),
+        required=False,
+    )
+    vminterface = DynamicModelChoiceField(
+        label=_('VM Interface'),
+        queryset=VMInterface.objects.all(),
+        required=False,
+    )
+    is_primary = forms.BooleanField(
+        required=False,
+        label=_('Primary for interface'),
+    )
+
+    fieldsets = (
+        FieldSet(
+            'mac_address', 'description', 'tags',
+        ),
+        FieldSet(
+            TabbedGroups(
+                FieldSet('interface', name=_('Device')),
+                FieldSet('vminterface', name=_('Virtual Machine')),
+            ),
+            'is_primary', name=_('Assignment')
+        ),
+    )
+
+    class Meta:
+        model = MACAddress
+        fields = [
+            'mac_address', 'interface', 'vminterface', 'is_primary', 'description', 'tags',
+        ]
+
+    def __init__(self, *args, **kwargs):
+
+        # Initialize helper selectors
+        instance = kwargs.get('instance')
+        initial = kwargs.get('initial', {}).copy()
+        if instance:
+            if type(instance.assigned_object) is Interface:
+                initial['interface'] = instance.assigned_object
+            elif type(instance.assigned_object) is VMInterface:
+                initial['vminterface'] = instance.assigned_object
+        kwargs['initial'] = initial
+
+        super().__init__(*args, **kwargs)
+
+    def clean_is_primary(self):
+        # If setting this MACAddress to primary, unset all the rest on this interface
+        if is_primary := self.cleaned_data['is_primary']:
+            if interface := self.cleaned_data['interface']:
+                interface.mac_addresses.all().update(is_primary=False)
+            if vminterface := self.cleaned_data['vminterface']:
+                vminterface.mac_addresses.all().update(is_primary=False)
+        return is_primary
+
+    def clean(self):
+        super().clean()
+
+        # Handle object assignment
+        selected_objects = [
+            field for field in ('interface', 'vminterface') if self.cleaned_data[field]
+        ]
+        if len(selected_objects) > 1:
+            raise forms.ValidationError({
+                selected_objects[1]: _("A MAC address can only be assigned to a single object.")
+            })
+        elif selected_objects:
+            assigned_object = self.cleaned_data[selected_objects[0]]
+            if self.instance.pk and self.instance.assigned_object and self.cleaned_data['is_primary'] and assigned_object != self.instance.assigned_object:
+                raise ValidationError(
+                    _("Cannot reassign MAC address while it is designated as the primary MAC for the interface")
+                )
+            self.instance.assigned_object = assigned_object
+        else:
+            self.instance.assigned_object = None
+
+        # Primary MAC assignment is only available if an interface has been assigned.
+        interface = self.cleaned_data.get('interface') or self.cleaned_data.get('vminterface')
+        if self.cleaned_data.get('is_primary') and not interface:
+            self.add_error(
+                'is_primary', _("Only IP addresses assigned to an interface can be designated as primary IPs.")
+            )
+
+
+#
 # Device component templates
 #
 
@@ -1434,6 +1531,21 @@ class InterfaceForm(InterfaceCommonForm, ModularDeviceComponentForm):
         labels = {
             'mode': '802.1Q Mode',
         }
+
+    def clean_mac_address(self):
+        if self.cleaned_data['mac_address'] and (
+            not self.instance.pk or
+            not MACAddress.objects.filter(mac_address=self.cleaned_data['mac_address'], interface=self.instance).exists()
+        ):
+            mac_address = MACAddress.objects.create(mac_address=self.cleaned_data['mac_address'])
+            return mac_address
+        return None
+
+    def save(self, commit=True):
+        result = super().save(commit=commit)
+        if self.cleaned_data['mac_address']:
+            self.instance.mac_addresses.add(self.cleaned_data['mac_address'])
+        return result
 
 
 class FrontPortForm(ModularDeviceComponentForm):

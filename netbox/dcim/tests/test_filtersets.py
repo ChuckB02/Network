@@ -2323,10 +2323,17 @@ class DeviceTestCase(TestCase, ChangeLoggedFilterSetTests):
             PowerOutlet(device=devices[1], name='Power Outlet 2'),
         ))
         interfaces = (
-            Interface(device=devices[0], name='Interface 1', mac_address='00-00-00-00-00-01'),
-            Interface(device=devices[1], name='Interface 2', mac_address='00-00-00-00-00-02'),
+            Interface(device=devices[0], name='Interface 1'),
+            Interface(device=devices[1], name='Interface 2'),
         )
         Interface.objects.bulk_create(interfaces)
+        mac_addresses = (
+            MACAddress(mac_address='00-00-00-00-00-01'),
+            MACAddress(mac_address='00-00-00-00-00-02'),
+        )
+        MACAddress.objects.bulk_create(mac_addresses)
+        interfaces[0].mac_addresses.set([mac_addresses[0]])
+        interfaces[1].mac_addresses.set([mac_addresses[1]])
         rear_ports = (
             RearPort(device=devices[0], name='Rear Port 1', type=PortTypeChoices.TYPE_8P8C),
             RearPort(device=devices[1], name='Rear Port 2', type=PortTypeChoices.TYPE_8P8C),
@@ -3670,6 +3677,13 @@ class InterfaceTestCase(TestCase, DeviceComponentFilterSetTests, ChangeLoggedFil
         )
         VirtualDeviceContext.objects.bulk_create(vdcs)
 
+        mac_addresses = (
+            MACAddress(mac_address='00-00-00-00-00-01'),
+            MACAddress(mac_address='00-00-00-00-00-02'),
+            MACAddress(mac_address='00-00-00-00-00-03'),
+        )
+        MACAddress.objects.bulk_create(mac_addresses)
+
         vlans = (
             VLAN(name='SVLAN 1', vid=1001, qinq_role=VLANQinQRoleChoices.ROLE_SERVICE),
             VLAN(name='SVLAN 2', vid=1002, qinq_role=VLANQinQRoleChoices.ROLE_SERVICE),
@@ -3695,7 +3709,6 @@ class InterfaceTestCase(TestCase, DeviceComponentFilterSetTests, ChangeLoggedFil
                 mgmt_only=True,
                 mtu=100,
                 mode=InterfaceModeChoices.MODE_ACCESS,
-                mac_address='00-00-00-00-00-01',
                 description='First',
                 vrf=vrfs[0],
                 speed=1000000,
@@ -3721,7 +3734,6 @@ class InterfaceTestCase(TestCase, DeviceComponentFilterSetTests, ChangeLoggedFil
                 mgmt_only=True,
                 mtu=200,
                 mode=InterfaceModeChoices.MODE_TAGGED,
-                mac_address='00-00-00-00-00-02',
                 description='Second',
                 vrf=vrfs[1],
                 speed=1000000,
@@ -3740,7 +3752,6 @@ class InterfaceTestCase(TestCase, DeviceComponentFilterSetTests, ChangeLoggedFil
                 mgmt_only=False,
                 mtu=300,
                 mode=InterfaceModeChoices.MODE_TAGGED_ALL,
-                mac_address='00-00-00-00-00-03',
                 description='Third',
                 vrf=vrfs[2],
                 speed=100000,
@@ -3813,6 +3824,10 @@ class InterfaceTestCase(TestCase, DeviceComponentFilterSetTests, ChangeLoggedFil
         interfaces[5].vdcs.set([vdcs[0]])
         interfaces[6].vdcs.set([vdcs[0]])
         interfaces[7].vdcs.set([vdcs[1]])
+
+        interfaces[0].mac_addresses.set([mac_addresses[0]])
+        interfaces[2].mac_addresses.set([mac_addresses[1]])
+        interfaces[3].mac_addresses.set([mac_addresses[2]])
 
         # Cables
         Cable(a_terminations=[interfaces[0]], b_terminations=[interfaces[5]]).save()

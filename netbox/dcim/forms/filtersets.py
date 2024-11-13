@@ -34,6 +34,7 @@ __all__ = (
     'InventoryItemFilterForm',
     'InventoryItemRoleFilterForm',
     'LocationFilterForm',
+    'MACAddressFilterForm',
     'ManufacturerFilterForm',
     'ModuleFilterForm',
     'ModuleBayFilterForm',
@@ -1197,6 +1198,24 @@ class PowerFeedFilterForm(TenancyFilterForm, NetBoxModelFilterSetForm):
     max_utilization = forms.IntegerField(
         label=_('Max utilization'),
         required=False
+    )
+    tag = TagFilterField(model)
+
+
+#
+# Addressing
+#
+
+class MACAddressFilterForm(NetBoxModelFilterSetForm):
+    model = MACAddress
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag'),
+        FieldSet('mac_address', name=_('Addressing')),
+    )
+    selector_fields = ('filter_id', 'q', 'device_id')
+    mac_address = forms.CharField(
+        required=False,
+        label=_('MAC address')
     )
     tag = TagFilterField(model)
 

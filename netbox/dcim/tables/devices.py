@@ -29,6 +29,7 @@ __all__ = (
     'InterfaceTable',
     'InventoryItemRoleTable',
     'InventoryItemTable',
+    'MACAddressTable',
     'ModuleBayTable',
     'PlatformTable',
     'PowerOutletTable',
@@ -595,6 +596,43 @@ class BaseInterfaceTable(NetBoxTable):
 
     def value_tagged_vlans(self, value):
         return ",".join([str(obj) for obj in value.all()])
+
+
+class MACAddressTable(NetBoxTable):
+    mac_address = tables.Column(
+        verbose_name=_('MAC Address'),
+        linkify=True
+    )
+    assigned_object = tables.Column(
+        linkify=True,
+        orderable=False,
+        verbose_name=_('Interface')
+    )
+    is_primary = columns.BooleanColumn(
+        verbose_name=_('Primary MAC'),
+        false_mark=None
+    )
+    assigned_device = tables.Column(
+        accessor='assigned_object__device',
+        verbose_name=_('Device'),
+        linkify=True
+    )
+    assigned_vm = tables.Column(
+        accessor='assigned_object__virtual_machine',
+        verbose_name=_('Virtual Machine'),
+        linkify=True
+    )
+    tags = columns.TagColumn(
+        url_name='dcim:macaddress_list'
+    )
+
+    class Meta(DeviceComponentTable.Meta):
+        model = models.MACAddress
+        fields = (
+            'pk', 'id', 'mac_address', 'assigned_object', 'created', 'last_updated', 'is_primary',
+            'assigned_device', 'assigned_vm',
+        )
+        default_columns = ('pk', 'mac_address', 'assigned_object', 'is_primary')
 
 
 class InterfaceTable(ModularDeviceComponentTable, BaseInterfaceTable, PathEndpointTable):

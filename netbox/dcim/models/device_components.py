@@ -10,7 +10,7 @@ from mptt.models import MPTTModel, TreeForeignKey
 
 from dcim.choices import *
 from dcim.constants import *
-from dcim.fields import MACAddressField, WWNField
+from dcim.fields import WWNField
 from netbox.choices import ColorChoices
 from netbox.models import OrganizationalModel, NetBoxModel
 from utilities.fields import ColorField, NaturalOrderingField
@@ -509,11 +509,6 @@ class BaseInterface(models.Model):
         verbose_name=_('enabled'),
         default=True
     )
-    mac_address = MACAddressField(
-        null=True,
-        blank=True,
-        verbose_name=_('MAC address')
-    )
     mtu = models.PositiveIntegerField(
         blank=True,
         null=True,
@@ -612,6 +607,12 @@ class BaseInterface(models.Model):
     @property
     def count_fhrp_groups(self):
         return self.fhrp_group_assignments.count()
+
+    @property
+    def mac_address(self):
+        if macaddress := self.mac_addresses.order_by('-is_primary').first():
+            return macaddress.mac_address
+        return None
 
 
 class Interface(ModularComponentModel, BaseInterface, CabledObjectModel, PathEndpoint, TrackingModelMixin):
@@ -738,6 +739,12 @@ class Interface(ModularComponentModel, BaseInterface, CabledObjectModel, PathEnd
     )
     ip_addresses = GenericRelation(
         to='ipam.IPAddress',
+        content_type_field='assigned_object_type',
+        object_id_field='assigned_object_id',
+        related_query_name='interface'
+    )
+    mac_addresses = GenericRelation(
+        to='dcim.MACAddress',
         content_type_field='assigned_object_type',
         object_id_field='assigned_object_id',
         related_query_name='interface'

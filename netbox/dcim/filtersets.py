@@ -20,7 +20,7 @@ from utilities.filters import (
     ContentTypeFilter, MultiValueCharFilter, MultiValueMACAddressFilter, MultiValueNumberFilter, MultiValueWWNFilter,
     NumericArrayFilter, TreeNodeMultipleChoiceFilter,
 )
-from virtualization.models import Cluster, ClusterGroup
+from virtualization.models import Cluster, ClusterGroup, VMInterface
 from vpn.models import L2VPN
 from wireless.choices import WirelessRoleChoices, WirelessChannelChoices
 from wireless.models import WirelessLAN, WirelessLink
@@ -52,6 +52,7 @@ __all__ = (
     'InventoryItemRoleFilterSet',
     'InventoryItemTemplateFilterSet',
     'LocationFilterSet',
+    'MACAddressFilterSet',
     'ManufacturerFilterSet',
     'ModuleBayFilterSet',
     'ModuleBayTemplateFilterSet',
@@ -1100,7 +1101,7 @@ class DeviceFilterSet(
         label=_('Is full depth'),
     )
     mac_address = MultiValueMACAddressFilter(
-        field_name='interfaces__mac_address',
+        field_name='interfaces__mac_addresses__mac_address',
         label=_('MAC address'),
     )
     serial = MultiValueCharFilter(
@@ -1599,6 +1600,45 @@ class PowerOutletFilterSet(
         )
 
 
+class MACAddressFilterSet(NetBoxModelFilterSet):
+    mac_address = MultiValueMACAddressFilter()
+    interface = django_filters.ModelMultipleChoiceFilter(
+        field_name='interface__name',
+        queryset=Interface.objects.all(),
+        to_field_name='name',
+        label=_('Interface (name)'),
+    )
+    interface_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='interface',
+        queryset=Interface.objects.all(),
+        label=_('Interface (ID)'),
+    )
+    vminterface = django_filters.ModelMultipleChoiceFilter(
+        field_name='vminterface__name',
+        queryset=VMInterface.objects.all(),
+        to_field_name='name',
+        label=_('VM interface (name)'),
+    )
+    vminterface_id = django_filters.ModelMultipleChoiceFilter(
+        field_name='vminterface',
+        queryset=VMInterface.objects.all(),
+        label=_('VM interface (ID)'),
+    )
+
+    class Meta:
+        model = MACAddress
+        fields = ('id', 'description', 'interface', 'assigned_object_type', 'assigned_object_id')
+
+    def search(self, queryset, name, value):
+        if not value.strip():
+            return queryset
+        qs_filter = (
+                Q(mac_address__icontains=value) |
+                Q(description__icontains=value)
+        )
+        return queryset.filter(qs_filter)
+
+
 class CommonInterfaceFilterSet(django_filters.FilterSet):
     vlan_id = django_filters.CharFilter(
         method='filter_vlan_id',
@@ -1703,7 +1743,10 @@ class InterfaceFilterSet(
     duplex = django_filters.MultipleChoiceFilter(
         choices=InterfaceDuplexChoices
     )
-    mac_address = MultiValueMACAddressFilter()
+    mac_address = MultiValueMACAddressFilter(
+        field_name='mac_addresses__mac_address',
+        label=_('MAC Address')
+    )
     wwn = MultiValueWWNFilter()
     poe_mode = django_filters.MultipleChoiceFilter(
         choices=InterfacePoEModeChoices
